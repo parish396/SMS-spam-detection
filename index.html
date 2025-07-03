@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SMS Spam Detector</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f0f2f5;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+        .container {
+            background-color: #ffffff;
+            border-radius: 12px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+            padding: 30px;
+            max-width: 600px;
+            width: 100%;
+            text-align: center;
+        }
+        textarea {
+            resize: vertical;
+            min-height: 120px;
+        }
+        button {
+            transition: background-color 0.3s ease, transform 0.2s ease;
+        }
+        button:hover {
+            transform: translateY(-2px);
+        }
+        .loading-spinner {
+            border: 4px solid rgba(0, 0, 0, 0.1);
+            border-left-color: #3b82f6;
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            animation: spin 1s linear infinite;
+            display: inline-block;
+            vertical-align: middle;
+            margin-right: 8px;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .result-box {
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 20px;
+            font-weight: bold;
+            font-size: 1.1em;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .result-box.spam {
+            background-color: #fee2e2; /* Red-100 */
+            color: #ef4444; /* Red-500 */
+            border: 1px solid #fca5a5; /* Red-300 */
+        }
+        .result-box.ham {
+            background-color: #dcfce7; /* Green-100 */
+            color: #22c55e; /* Green-500 */
+            border: 1px solid #86efac; /* Green-300 */
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 class="text-3xl font-extrabold text-gray-800 mb-6">SMS Spam Detector</h1>
+        <p class="text-gray-600 mb-8">Enter an SMS message below to check if it's spam or not.</p>
+
+        <textarea
+            id="smsInput"
+            class="w-full p-4 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 mb-6 text-gray-700"
+            placeholder="Type your SMS message here..."
+        ></textarea>
+
+        <button
+            id="detectBtn"
+            class="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-6 rounded-lg shadow-md flex items-center justify-center mx-auto"
+        >
+            <span id="buttonText">Detect Spam</span>
+            <span id="loadingSpinner" class="hidden loading-spinner"></span>
+        </button>
+
+        <div id="result" class="result-box hidden"></div>
+    </div>
+
+    <script>
+        // Get references to DOM elements
+        const smsInput = document.getElementById('smsInput');
+        const detectBtn = document.getElementById('detectBtn');
+        const buttonText = document.getElementById('buttonText');
+        const loadingSpinner = document.getElementById('loadingSpinner');
+        const resultDiv = document.getElementById('result');
+
+        // Event listener for the detect button
+        detectBtn.addEventListener('click', async () => {
+            const message = smsInput.value.trim();
+
+            if (!message) {
+                displayResult('Please enter an SMS message.', 'error');
+                return;
+            }
+
+            // Show loading state
+            buttonText.textContent = 'Detecting...';
+            loadingSpinner.classList.remove('hidden');
+            detectBtn.disabled = true;
+            resultDiv.classList.add('hidden'); // Hide previous result
+
+            try {
+                // Construct the prompt for the Gemini API
+                const prompt = `Classify the following SMS message as either "spam" or "ham" (not spam). Respond with only "spam" or "ham".\n\nMessage: "${message}"`;
+
+                // Prepare the payload for the Gemini API
+                let chatHistory = [];
+                chatHistory.push({ role: "user", parts: [{ text: prompt }] });
+                const payload = { contents: chatHistory };
+
+                // API Key is left empty; Canvas will inject it at runtime
+                const apiKey = "AIzaSyAxUDoCVYkaJiXqMvXo6i9gF00G_YqtNuM";
+                const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+
+                // Make the API call
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                const result = await response.json();
+
+                if (result.candidates && result.candidates.length > 0 &&
+                    result.candidates[0].content && result.candidates[0].content.parts &&
+                    result.candidates[0].content.parts.length > 0) {
+                    const classification = result.candidates[0].content.parts[0].text.toLowerCase().trim();
+
+                    if (classification === 'spam') {
+                        displayResult('This message is: SPAM', 'spam');
+                    } else if (classification === 'ham') {
+                        displayResult('This message is: NOT SPAM (Ham)', 'ham');
+                    } else {
+                        displayResult('Could not classify the message. Please try again.', 'error');
+                    }
+                } else {
+                    displayResult('Error: Unexpected API response structure.', 'error');
+                    console.error('API Response Error:', result);
+                }
+
+            } catch (error) {
+                console.error('Error detecting spam:', error);
+                displayResult('An error occurred. Please try again.', 'error');
+            } finally {
+                // Reset button state
+                buttonText.textContent = 'Detect Spam';
+                loadingSpinner.classList.add('hidden');
+                detectBtn.disabled = false;
+            }
+        });
+
+        /**
+         * Displays the result message in the UI.
+         * @param {string} message - The message to display.
+         * @param {'spam'|'ham'|'error'} type - The type of message to style the result box.
+         */
+        function displayResult(message, type) {
+            resultDiv.textContent = message;
+            resultDiv.classList.remove('hidden', 'spam', 'ham', 'error'); // Remove previous classes
+            resultDiv.classList.add(type); // Add the new type class
+        }
+    </script>
+</body>
+</html>
